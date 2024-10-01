@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>webcam-pixelation-canvas record</title>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<style>
+   body{margin:0;background: black;} 
+  </style>
+</head>
+<body>
+
+<video id="video" autoplay style="display: none;"></video>
+<canvas id="canvas" width="640" height="480"></canvas>
+<br>
+<button id="wStart">STOP</button>
+<button id="recordCanvas">REC</button>
+<input type="range" min="10" max="80" value="25" id="pxSize">
+
+<script type="text/javascript">
+
+let canvas = document.getElementById('canvas');
+let context = canvas.getContext('2d',{ willReadFrequently: true });
+let video = document.getElementById('video');
+let ani;
+let tw = 640;
+let th = 480;
+let playing = false;
+
+startVideo(); 
+drawVideo(context); playing=true;
+
+wStart.onclick = () => {
+  if(!playing){
+    drawVideo(context); playing=true;
+    wStart.innerHTML = "STOP";
+  }else{
+    cancelAnimationFrame(ani); playing=false;
+    wStart.innerHTML = "PLAY";
+  }
+}
+
+function startVideo() {
+  navigator.mediaDevices.getUserMedia({ video: true })
+    .then(stream => { video.srcObject = stream; video.play();})
+    .catch(error => { console.error('Error', error);});
+}
+
+function drawVideo() {
+	context.drawImage(video, 0, 0, tw, th);
+  pixelateCanvas(context, Number(pxSize.value));
+
+  let imageData = context.getImageData(0,0,tw,th);
+  let data = imageData.data;
+  let toData = new Uint8ClampedArray(data.length);
+  for(let y=0; y<th; y++){
+    for(let x=0; x < tw; x++){
+      let pos = (tw*y*4) + (x*4);
+
+      let avr = data[pos] + data[pos+1] + data[pos+2];
+      if(avr < 200){
+        toData[pos] = 0; toData[pos+1] = 0; toData[pos+2] = 0;
+      }else if(avr >= 200 && avr < 400){
+        toData[pos] = 0; toData[pos+1] = 0; toData[pos+2] = 255;
+      }else if(avr >= 400 && avr < 600){
+        toData[pos] = 255; toData[pos+1] = 0; toData[pos+2] = 0;
+      }else if(avr >=600){
+        toData[pos] = 0; toData[pos+1] = 255; toData[pos+2] = 0;
+      }
+      toData[pos + 3 ] = 255;
+    }
+  }
+
+  let newImage = new ImageData(toData,tw,th);
+  context.putImageData(newImage, 0, 0);
+	ani = requestAnimationFrame(drawVideo);
+};
+
+function pixelateCanvas(ctx, pixelSize) {
+  const canvasWidth = ctx.canvas.width;
+  const canvasHeight = ctx.canvas.height;
+
+  const pxCvs = document.createElement('canvas');
+  pxCvs.width = canvasWidth;
+  pxCvs.height = canvasHeight;
+  const pxCtx = pxCvs.getContext('2d',{ willReadFrequently: true });
+
+  pxCtx.drawImage(ctx.canvas, 0, 0);
+
+  pxCtx.imageSmoothingEnabled = false;
+  pxCtx.mozImageSmoothingEnabled = false;
+  pxCtx.webkitImageSmoothingEnabled = false;
+  pxCtx.msImageSmoothingEnabled = false;
+
+  for (let x = 0; x < canvasWidth; x += pixelSize) {
+    for (let y = 0; y < canvasHeight; y += pixelSize) {
+      const pixelData = pxCtx.getImageData(x, y, pixelSize, pixelSize);
+      const averageColor = getAverageColor(pixelData);
+      pxCtx.fillStyle = `rgba(${averageColor.r}, ${averageColor.g}, ${averageColor.b}, ${averageColor.a})`;
+      pxCtx.fillRect(x, y, pixelSize, pixelSize);
+    }
+  }
+
+  ctx.drawImage(pxCvs, 0, 0);
+}
+
+function getAverageColor(pixelData) {
+  const data = pixelData.data;
+  let r = 0; let g = 0; let b = 0; let a = 0;
+
+  for (let i = 0; i < data.length; i += 4) {
+    r += data[i];g += data[i + 1];b += data[i + 2];a += data[i + 3];
+  }
+
+  const numPixels = data.length / 4;
+  return {
+    r: Math.round(r / numPixels),
+    g: Math.round(g / numPixels),
+    b: Math.round(b / numPixels),
+    a: Math.round(a / numPixels)
+  };
+}
+
+
+
+const recordBtn = document.querySelector("#recordCanvas");
+
+let recording = false;
+let mediaRecorder;
+let recordedChunks;
+
+recordBtn.onclick = () => {
+  recording = !recording;
+    if(recording){
+            recordBtn.textContent = "Stop";
+            const stream = canvas.captureStream(25);
+            mediaRecorder = new MediaRecorder(stream, {
+                mimeType: 'video/mp4',
+                ignoreMutedMedia: true
+            });
+            recordedChunks = [];
+            mediaRecorder.ondataavailable = e => {
+                if(e.data.size > 0){
+                    recordedChunks.push(e.data);
+                }
+            };
+            mediaRecorder.start();
+        } else {
+            recordBtn.textContent = "Record"
+            mediaRecorder.stop();
+            setTimeout(() => {
+                const blob = new Blob(recordedChunks, {
+                    type: "video/webm"
+                });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "recording.webm";
+                a.click();
+                URL.revokeObjectURL(url);
+            },0);
+        }
+};
+
+</script>
+</body>
+</html>
